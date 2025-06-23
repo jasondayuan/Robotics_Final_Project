@@ -7,9 +7,10 @@ from map_generation import MazeDataset
 class EnvConfig:
     def __init__(self):
         # Robot physical parameters
-        self.robot_radius = 0.2
-        self.wheel_radius = 0.05
-        self.wheel_base = 0.3
+        self.robot_radius = 0.089
+        self.wheel_radius = 0.033
+        self.wheel_base = 0.16
+        self.ang_vel_limit = 2.84
         
         # LIDAR parameters
         self.num_scans = 360
@@ -17,7 +18,7 @@ class EnvConfig:
         self.fov = np.pi * 2 
         
         # Simulation parameters
-        self.dt = 0.05
+        self.dt = 0.1
         
         # Noise parameters (standard deviations)
         self.motion_pos_std = 0.01  
@@ -50,6 +51,7 @@ class Env:
         # Robot parameters
         self.wheel_radius = config.wheel_radius
         self.wheel_base = config.wheel_base
+        self.ang_vel_limit = config.ang_vel_limit
 
         # LIDAR parameters
         self.num_scans = config.num_scans
@@ -68,6 +70,7 @@ class Env:
 
     def step(self, wheel_velocities):
 
+        wheel_velocities = np.clip(wheel_velocities, -self.ang_vel_limit, self.ang_vel_limit)
         omega_l, omega_r = wheel_velocities
         dt = 0.1  # time step
 
@@ -150,9 +153,7 @@ class Env:
         return observation
 
     def render(self, observation=None, filename=None):
-        """
-        Renders the environment, optionally showing LIDAR scans and saving to a file.
-        """
+
         fig, ax = plt.subplots(figsize=(self.maze_size[0], self.maze_size[1]))
         ax.set_xlim(-0.5, self.maze_size[0] + 0.5)
         ax.set_ylim(-0.5, self.maze_size[1] + 0.5)
@@ -201,9 +202,15 @@ class Env:
 
     def _get_observation(self):
         perfect_scans = self._simulate_lidar(self.robot_pose)
-        noise = np.random.normal(0, np.sqrt(self.obs_noise_cov))
-        noisy_scans = perfect_scans + noise
+
+        noise = np.random.normal(0, np.sqrt(self.obs_noise_cov), size=self.num_scans)
+
+        noisy_scans = perfect_scans.copy()
+        hit_mask = perfect_scans < self.max_range
+        noisy_scans[hit_mask] += noise[hit_mask]
+  
         noisy_scans = np.clip(noisy_scans, 0, self.max_range)
+    
         return noisy_scans
         
     def _simulate_lidar(self, pose):
@@ -296,6 +303,8 @@ class Env:
 
 
 if __name__ == "__main__":
+
+    np.random.seed(42) 
     
     dataset = MazeDataset()
     dataset.load_dataset('dataset/development_dataset.json')
