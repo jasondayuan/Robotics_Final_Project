@@ -187,7 +187,7 @@ if __name__ == "__main__":
     dataset = MazeDataset()
     for maze_size in maze_sizes:
         cell_size = [1, 1]
-        wall_thickness = 0.1
+        wall_thickness = 0.3
         dataset.generate_mazes(maze_size, cell_size, num_mazes, wall_thickness)
     
     dataset.save_dataset('dataset/development_dataset.json')

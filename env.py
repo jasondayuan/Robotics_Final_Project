@@ -3,6 +3,7 @@ import json
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from map_generation import MazeDataset
+from corner_detector import CornerDetector
 
 class EnvConfig:
     def __init__(self):
@@ -13,8 +14,8 @@ class EnvConfig:
         self.ang_vel_limit = 2.84
         
         # LIDAR parameters
-        self.num_scans = 360
-        self.max_range = 3.0
+        self.num_scans = 180
+        self.max_range = 3.5
         self.fov = np.pi * 2 
         
         # Simulation parameters
@@ -200,6 +201,61 @@ class Env:
         
         plt.close(fig)
 
+    def render_debug(self, observation=None, filename=None):
+
+        fig, ax = plt.subplots(figsize=(self.maze_size[0], self.maze_size[1]))
+        ax.set_xlim(-0.5, self.maze_size[0] + 0.5)
+        ax.set_ylim(-0.5, self.maze_size[1] + 0.5)
+        ax.set_aspect('equal')
+
+        # Draw walls
+        for wall in self.walls:
+            ax.add_patch(patches.Rectangle((wall[0], wall[1]), wall[2], wall[3], facecolor='blue'))
+
+        # Draw robot
+        robot_patch = patches.Circle((self.robot_pose[0], self.robot_pose[1]), self.robot_radius, facecolor='red')
+        ax.add_patch(robot_patch)
+        
+        # Draw LIDAR scans if available
+        if observation is not None:
+            robot_x, robot_y, robot_theta = self.robot_pose
+            lidar_points_x = []
+            lidar_points_y = []
+            hit_points = []
+            for i, scan_dist in enumerate(observation):
+                if scan_dist < self.max_range: 
+                    angle_offset = -self.fov / 2 + (i / self.num_scans) * self.fov
+                    scan_angle = robot_theta + angle_offset
+                    
+                    hit_x = robot_x + scan_dist * np.cos(scan_angle)
+                    hit_y = robot_y + scan_dist * np.sin(scan_angle)
+                    lidar_points_x.append(hit_x)
+                    lidar_points_y.append(hit_y)
+                    hit_points.append([hit_x, hit_y])
+            ax.scatter(lidar_points_x, lidar_points_y, s=2, c='green', zorder=3)
+
+            hit_points = np.array(hit_points)
+            detector = CornerDetector()
+            corners = detector.detect_corners(hit_points) # (#corner, 2)
+            if len(corners) > 0:
+                ax.scatter(corners[:, 0], corners[:, 1], s=20, c='orange', zorder=4, label='Corners')
+
+        # Draw robot's direction
+        arrow_len = self.robot_radius * 1.5
+        ax.arrow(self.robot_pose[0], self.robot_pose[1],
+                 arrow_len * np.cos(self.robot_pose[2]),
+                 arrow_len * np.sin(self.robot_pose[2]),
+                 head_width=0.1, head_length=0.1, fc='k', ec='k')
+        
+        # Save or show the plot
+        if filename:
+            plt.savefig(filename)
+            print(f"Plot saved to {filename}")
+        else:
+            plt.show()
+        
+        plt.close(fig)
+
     def _get_observation(self):
         perfect_scans = self._simulate_lidar(self.robot_pose)
 
@@ -322,4 +378,4 @@ if __name__ == "__main__":
     print(f"\nRunning simulation for {num_steps} steps...")
     for i in range(num_steps):
         observation = env.step(action)
-        env.render(observation=observation, filename=f"data/step_{i+1}.png")
+        env.render_debug(observation=observation, filename=f"data/step_{i+1}.png")
