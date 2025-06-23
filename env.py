@@ -5,7 +5,7 @@ import matplotlib.patches as patches
 from map_generation import MazeDataset
 from corner_detector import CornerDetector
 
-class EnvConfig:
+class RobotConfig:
     def __init__(self):
         # Robot physical parameters
         self.robot_radius = 0.089
@@ -146,8 +146,11 @@ class Env:
         # Update pose to the point just before collision
         final_x = x + dx * travel_fraction
         final_y = y + dy * travel_fraction
+        
+        # Normalize angle to [-pi, pi] for consistency with FastSLAM
+        theta_normalized = self._normalize_angle(theta_new)
 
-        self.robot_pose = np.array([final_x, final_y, theta_new])
+        self.robot_pose = np.array([final_x, final_y, theta_normalized])
         
         observation = self._get_observation()
 
@@ -312,6 +315,12 @@ class Env:
         
         return scans
 
+    def _normalize_angle(self, angle):
+        """
+        Normalize angle to [-pi, pi] to match FastSLAM representation
+        """
+        return np.arctan2(np.sin(angle), np.cos(angle))
+
     def _get_walls(self):
         # Representation of wall - a (x, y, w, h) box
 
@@ -366,7 +375,7 @@ if __name__ == "__main__":
     dataset.load_dataset('dataset/development_dataset.json')
     maze = dataset[100]
 
-    config = EnvConfig()
+    config = RobotConfig()
     env = Env(maze=maze, config=config)
 
     print("Initial robot pose:", env.robot_pose)

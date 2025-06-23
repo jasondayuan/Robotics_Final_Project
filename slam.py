@@ -1,13 +1,15 @@
 import numpy as np
 from copy import deepcopy
 import matplotlib.pyplot as plt
+from env import RobotConfig
 
 class Particle:
     def __init__(self):
+
         # Robot pose [x, y, theta]
         self.pose = np.zeros(3)
         
-        # Weight of this particle
+        # Particle weight
         self.weight = 1.0
         
         # Dictionary of landmarks: {landmark_id: {'mean': [x, y], 'cov': 2x2 matrix}}
@@ -17,15 +19,19 @@ class Particle:
         self.path = []
 
 class FastSLAM:
+
     def __init__(self, num_particles=100):
+
+        self.config = RobotConfig()
+
         self.num_particles = num_particles
         self.particles = [Particle() for _ in range(num_particles)]
         
         # Motion model noise
-        self.motion_noise_cov = np.diag([0.1**2, 0.1**2, np.deg2rad(5)**2])
+        self.motion_noise_cov = self.config.motion_noise_cov 
         
         # Observation model noise
-        self.obs_noise_cov = np.diag([0.1**2, 0.1**2])  # [range, bearing] or [x, y]
+        self.obs_noise_cov = self.config.obs_noise_cov
         
         # Data association parameters
         self.max_association_distance = 0.5
@@ -35,12 +41,7 @@ class FastSLAM:
         self.effective_sample_size_threshold = self.num_particles / 3
         
     def predict(self, control_input, dt):
-        """
-        Prediction step: propagate particles using motion model
-        Args:
-            control_input: [v, omega] - linear and angular velocities
-            dt: time step
-        """
+    
         for particle in self.particles:
             # Apply motion model with noise
             self._motion_model(particle, control_input, dt)
@@ -49,51 +50,47 @@ class FastSLAM:
             particle.path.append(particle.pose.copy())
     
     def update(self, observations):
-        """
-        Update step: process landmark observations
-        Args:
-            observations: list of detected landmarks [(x, y), ...]
-        """
+
         for particle in self.particles:
-            # Process each observation
+     
             for obs in observations:
+
                 # Data association
                 associated_id = self._data_association(particle, obs)
                 
+                # Update landmark if associated, or initialize if new
                 if associated_id is not None:
-                    # Update existing landmark
                     self._update_landmark(particle, associated_id, obs)
                 else:
-                    # Initialize new landmark
                     self._initialize_landmark(particle, obs)
             
-            # Update particle weight based on observation likelihood
+            # Update particle weight
             self._update_weight(particle, observations)
         
         # Normalize weights
         self._normalize_weights()
         
-        # Resample if needed
+        # Resample if particle degeneracy is detected
         if self._effective_sample_size() < self.effective_sample_size_threshold:
             self._resample()
     
     def _motion_model(self, particle, control_input, dt):
-        """
-        Apply motion model to particle
-        """
-        v, omega = control_input
+
+        omega_l, omega_r = control_input
         x, y, theta = particle.pose
         
+        # Robot parameters
+        wheel_radius = self.config.wheel_radius  
+        wheel_base = self.config.wheel_base
+        
+        # Convert wheel velocities to robot velocities
+        v = (wheel_radius / 2) * (omega_r + omega_l) 
+        omega = (wheel_radius / wheel_base) * (omega_r - omega_l)
+        
         # Differential drive kinematics
-        if abs(omega) < 1e-6:  # Straight line motion
-            dx = v * dt * np.cos(theta)
-            dy = v * dt * np.sin(theta)
-            dtheta = 0
-        else:  # Curved motion
-            radius = v / omega
-            dtheta = omega * dt
-            dx = radius * (np.sin(theta + dtheta) - np.sin(theta))
-            dy = radius * (np.cos(theta) - np.cos(theta + dtheta))
+        dx = v * dt * np.cos(theta)
+        dy = v * dt * np.sin(theta)
+        dtheta = omega * dt
         
         # Add motion noise
         motion_noise = np.random.multivariate_normal(np.zeros(3), self.motion_noise_cov)
@@ -107,10 +104,7 @@ class FastSLAM:
         particle.pose[2] = self._normalize_angle(particle.pose[2])
     
     def _data_association(self, particle, observation):
-        """
-        Find the most likely landmark for this observation
-        Returns: landmark_id if associated, None if new landmark
-        """
+
         if len(particle.landmarks) == 0:
             return None
         
@@ -337,8 +331,8 @@ if __name__ == "__main__":
     
     # Example simulation loop
     for step in range(100):
-        # Control input [linear_velocity, angular_velocity]
-        control = np.array([0.1, 0.05])
+        # Control input [omega_left, omega_right] - wheel angular velocities
+        control = np.array([1.0, 1.2])  # Example: slight turn to the right
         dt = 0.1
         
         # Prediction step
