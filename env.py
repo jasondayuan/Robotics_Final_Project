@@ -59,35 +59,57 @@ class Env:
         dy = v * np.sin(theta) * dt + motion_noise[1]
         
         # Collision detection
-        travel_fraction = 1.0 # Represents the fraction of movement allowed
+        travel_fraction = 1.0
         
-        # Check path against all walls
-        for wall in self.walls:
-            # Approximate continuous collision by checking collision with a wall expanded by the robot's radius
-            expanded_wall_x = wall[0] - self.robot_radius
-            expanded_wall_y = wall[1] - self.robot_radius
-            expanded_wall_w = wall[2] + 2 * self.robot_radius
-            expanded_wall_h = wall[3] + 2 * self.robot_radius
-
-            # Check intersection with the 4 edges of the expanded wall
-            for x1, y1, x2, y2 in [
-                (expanded_wall_x, expanded_wall_y, expanded_wall_x + expanded_wall_w, expanded_wall_y),
-                (expanded_wall_x, expanded_wall_y, expanded_wall_x, expanded_wall_y + expanded_wall_h),
-                (expanded_wall_x + expanded_wall_w, expanded_wall_y, expanded_wall_x + expanded_wall_w, expanded_wall_y + expanded_wall_h),
-                (expanded_wall_x, expanded_wall_y + expanded_wall_h, expanded_wall_x + expanded_wall_w, expanded_wall_y + expanded_wall_h)
-            ]:
-                den = (x1 - x2) * dy - (y1 - y2) * dx
-                if den == 0:
-                    continue
+        # If already in collision, don't move
+        if self._check_collision(np.array([x, y, theta])):
+            travel_fraction = 0.0
+            raise ValueError("Collision detected at initial pose.")
+        else:
+            # Check collision along the movement path
+            for wall in self.walls:
+                wall_x, wall_y, wall_w, wall_h = wall
                 
-                t = ((x1 - x) * dy - (y1 - y) * dx) / den
-                u = -((x1 - x2) * (y1 - y) - (y1 - y2) * (x1 - x)) / den
+                # Movement vector
+                move_length = np.sqrt(dx*dx + dy*dy)
+                if move_length < 1e-10:
+                    continue
+                    
+                # Normalize movement direction
+                move_dir_x = dx / move_length
+                move_dir_y = dy / move_length
+                
+                # Check collision with expanded wall (wall + robot radius)
+                expanded_x1 = wall_x - self.robot_radius
+                expanded_y1 = wall_y - self.robot_radius
+                expanded_x2 = wall_x + wall_w + self.robot_radius
+                expanded_y2 = wall_y + wall_h + self.robot_radius
+                
+                # Check intersection with each edge of expanded wall
+                for edge_x1, edge_y1, edge_x2, edge_y2 in [
+                    (expanded_x1, expanded_y1, expanded_x2, expanded_y1),  # Bottom edge
+                    (expanded_x2, expanded_y1, expanded_x2, expanded_y2),  # Right edge
+                    (expanded_x2, expanded_y2, expanded_x1, expanded_y2),  # Top edge
+                    (expanded_x1, expanded_y2, expanded_x1, expanded_y1),  # Left edge
+                ]:
+                    # Line-line intersection between movement path and wall edge
+                    edge_dir_x = edge_x2 - edge_x1
+                    edge_dir_y = edge_y2 - edge_y1
+                    
+                    denom = move_dir_y * edge_dir_x - move_dir_x * edge_dir_y
+                    if abs(denom) < 1e-10:  # Parallel lines
+                        continue
+                    
+                    t_edge = (move_dir_x * (edge_y1 - y) - move_dir_y * (edge_x1 - x)) / denom
+                    t_move = (edge_dir_x * (edge_y1 - y) - edge_dir_y * (edge_x1 - x)) / denom
+                    
+                    # Check if intersection is valid
+                    if 0 <= t_edge <= 1 and 0 < t_move <= move_length:
+                        collision_fraction = t_move / move_length
+                        if collision_fraction < travel_fraction:
+                            travel_fraction = max(0, collision_fraction - 1e-6)
 
-                # If intersection occurs within the path segment and wall edge
-                if 0 < t < 1 and 0 < u < travel_fraction:
-                    travel_fraction = u # We found a closer collision
-
-        # Update pose to the point of collision
+        # Update pose to the point just before collision
         final_x = x + dx * travel_fraction
         final_y = y + dy * travel_fraction
 
@@ -262,10 +284,9 @@ if __name__ == "__main__":
 
     print("Initial robot pose:", env.robot_pose)
     initial_observation = env.reset()
-    env.render()
 
-    num_steps = 50
-    action = np.array([5.0, 4.5])
+    num_steps = 200
+    action = np.array([5.0, 5.0])
     
     print(f"\nRunning simulation for {num_steps} steps...")
     for i in range(num_steps):
