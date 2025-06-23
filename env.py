@@ -4,8 +4,38 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from map_generation import MazeDataset
 
+class EnvConfig:
+    def __init__(self):
+        # Robot physical parameters
+        self.robot_radius = 0.2
+        self.wheel_radius = 0.05
+        self.wheel_base = 0.3
+        
+        # LIDAR parameters
+        self.num_scans = 360
+        self.max_range = 3.0
+        self.fov = np.pi * 2 
+        
+        # Simulation parameters
+        self.dt = 0.05
+        
+        # Noise parameters (standard deviations)
+        self.motion_pos_std = 0.01  
+        self.motion_ang_std = np.deg2rad(0.5)  
+        self.obs_noise_std = 0.02 
+        
+    @property
+    def motion_noise_cov(self):
+        return np.diag([self.motion_pos_std**2, self.motion_pos_std**2, self.motion_ang_std**2])
+    
+    @property
+    def obs_noise_cov(self):
+        return self.obs_noise_std**2
+
 class Env:
-    def __init__(self, maze, motion_noise_cov, obs_noise_cov, num_scans=360, max_range=5.0, wheel_radius=0.05, wheel_base=0.3, fov=np.pi/2):
+    def __init__(self, maze, config):
+
+        self.config = config
 
         self.maze = maze
         self.maze_size = np.array(maze['maze_size'])
@@ -15,20 +45,20 @@ class Env:
         
         # Robot state - [x, y, theta]
         self.robot_pose = np.array([self.cell_size[0] / 2, self.cell_size[1] / 2, 0.0])
-        self.robot_radius = self.cell_size[0] / 4
+        self.robot_radius = config.robot_radius
 
         # Robot parameters
-        self.wheel_radius = wheel_radius
-        self.wheel_base = wheel_base
+        self.wheel_radius = config.wheel_radius
+        self.wheel_base = config.wheel_base
 
         # LIDAR parameters
-        self.num_scans = num_scans
-        self.max_range = max_range
-        self.fov = fov
+        self.num_scans = config.num_scans
+        self.max_range = config.max_range
+        self.fov = config.fov
 
         # Noise parameters
-        self.motion_noise_cov = motion_noise_cov
-        self.obs_noise_cov = obs_noise_cov
+        self.motion_noise_cov = config.motion_noise_cov
+        self.obs_noise_cov = config.obs_noise_cov
 
         self.walls = self._get_walls()
 
@@ -269,18 +299,10 @@ if __name__ == "__main__":
     
     dataset = MazeDataset()
     dataset.load_dataset('dataset/development_dataset.json')
-    first_maze = dataset[0]
+    maze = dataset[50]
 
-    motion_cov = np.diag([0.01**2, 0.01**2, np.deg2rad(0.5)**2])
-    obs_var = 0.02**2
-
-    env = Env(
-        maze=first_maze,
-        motion_noise_cov=motion_cov,
-        obs_noise_cov=obs_var,
-        num_scans=90, 
-        fov=np.pi * 2
-    )
+    config = EnvConfig()
+    env = Env(maze=maze, config=config)
 
     print("Initial robot pose:", env.robot_pose)
     initial_observation = env.reset()
