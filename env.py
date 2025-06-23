@@ -364,7 +364,7 @@ if __name__ == "__main__":
     
     dataset = MazeDataset()
     dataset.load_dataset('dataset/development_dataset.json')
-    maze = dataset[50]
+    maze = dataset[100]
 
     config = EnvConfig()
     env = Env(maze=maze, config=config)
