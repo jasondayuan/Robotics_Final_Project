@@ -31,10 +31,10 @@ class FastSLAM:
         self.motion_noise_cov = self.config.motion_noise_cov 
         
         # Observation model noise
-        self.obs_noise_cov = self.config.obs_noise_cov
+        self.obs_noise_cov = np.diag([self.config.obs_noise_std**2, self.config.obs_noise_std**2])
         
         # Data association parameters
-        self.max_association_distance = 0.5
+        self.max_association_distance = 0.2
         self.new_landmark_threshold = 0.3
         
         # Resampling parameters
@@ -104,7 +104,7 @@ class FastSLAM:
         particle.pose[2] = self._normalize_angle(particle.pose[2])
     
     def _data_association(self, particle, observation):
-
+ 
         if len(particle.landmarks) == 0:
             return None
         
@@ -112,30 +112,20 @@ class FastSLAM:
         best_id = None
         
         for landmark_id, landmark in particle.landmarks.items():
-            # Predicted observation for this landmark
+
             predicted_obs = self._observation_model(particle.pose, landmark['mean'])
             
-            # Mahalanobis distance for data association
-            innovation = observation - predicted_obs
+            distance = np.linalg.norm(observation - predicted_obs)
             
-            # Innovation covariance (simplified)
-            innovation_cov = self.obs_noise_cov + landmark['cov']
-            
-            try:
-                mahal_dist = np.sqrt(innovation.T @ np.linalg.inv(innovation_cov) @ innovation)
-                
-                if mahal_dist < min_distance and mahal_dist < self.max_association_distance:
-                    min_distance = mahal_dist
-                    best_id = landmark_id
-            except np.linalg.LinAlgError:
-                continue
+            if distance < min_distance and distance < self.max_association_distance:
+                min_distance = distance
+                best_id = landmark_id
         
         return best_id
     
     def _update_landmark(self, particle, landmark_id, observation):
-        """
-        Update landmark using EKF
-        """
+        # Update existing landmark with new observation
+
         landmark = particle.landmarks[landmark_id]
         
         # Predicted observation
@@ -144,10 +134,10 @@ class FastSLAM:
         # Innovation
         innovation = observation - predicted_obs
         
-        # Jacobian of observation model w.r.t. landmark position
+        # Jacobian
         H = self._observation_jacobian(particle.pose, landmark['mean'])
         
-        # Innovation covariance
+        # Measurement covariance
         S = H @ landmark['cov'] @ H.T + self.obs_noise_cov
         
         # Kalman gain
@@ -159,28 +149,31 @@ class FastSLAM:
             landmark['cov'] = (np.eye(2) - K @ H) @ landmark['cov']
             
         except np.linalg.LinAlgError:
-            pass  # Skip update if matrix is singular
+            pass  # Skip update if S is not invertible
     
     def _initialize_landmark(self, particle, observation):
-        """
-        Initialize new landmark
-        """
-        # Convert observation to global coordinates
-        landmark_pos = self._observation_to_global(particle.pose, observation)
+        # Initialize a new landmark with the observation
+
+        landmark_pos = self._inverse_observation_model(particle.pose, observation)
         
-        # Initialize with high uncertainty
-        initial_cov = np.eye(2) * 1.0  # High initial uncertainty
+        H = self._observation_jacobian(particle.pose, landmark_pos)
+
+        try:
+            H_inv = np.linalg.inv(H)
+            landmark_cov = H_inv @ self.obs_noise_cov @ H_inv.T
+        except np.linalg.LinAlgError:
+            landmark_cov = np.eye(2) * 0.1
         
         # Add to particle's landmark map
         new_id = len(particle.landmarks)
         particle.landmarks[new_id] = {
             'mean': landmark_pos,
-            'cov': initial_cov
+            'cov': landmark_cov
         }
     
     def _update_weight(self, particle, observations):
         """
-        Update particle weight based on observation likelihood
+        Update particle weight based on observation
         """
         log_weight = 0.0
         
@@ -194,10 +187,10 @@ class FastSLAM:
                 
                 # Compute likelihood
                 innovation = obs - predicted_obs
-                innovation_cov = self.obs_noise_cov + landmark['cov']
+                H = self._observation_jacobian(particle.pose, landmark['mean'])
+                innovation_cov = self.obs_noise_cov + H @ landmark['cov'] @ H.T
                 
                 try:
-                    # Multivariate normal likelihood
                     det = np.linalg.det(innovation_cov)
                     if det > 0:
                         log_weight += -0.5 * (innovation.T @ np.linalg.inv(innovation_cov) @ innovation + 
@@ -205,30 +198,29 @@ class FastSLAM:
                 except np.linalg.LinAlgError:
                     pass
         
-        particle.weight *= np.exp(log_weight)
+        particle.weight = np.exp(log_weight)
     
     def _observation_model(self, robot_pose, landmark_pos):
         """
-        Predict observation given robot pose and landmark position
-        For corner landmarks, this could be direct (x, y) coordinates
+        robot_pose: [x, y, theta]
+        landmark_pos: [m_x, m_y], under the global frame
+        Returns the observation in the robot frame [local_x, local_y]
         """
-        # Transform landmark from global to robot frame
+
         dx = landmark_pos[0] - robot_pose[0]
         dy = landmark_pos[1] - robot_pose[1]
         
-        # Rotate to robot frame
-        cos_theta = np.cos(-robot_pose[2])
-        sin_theta = np.sin(-robot_pose[2])
+        cos_theta = np.cos(robot_pose[2])
+        sin_theta = np.sin(robot_pose[2])
         
-        local_x = cos_theta * dx - sin_theta * dy
-        local_y = sin_theta * dx + cos_theta * dy
+        local_x = cos_theta * dx + sin_theta * dy
+        local_y = -sin_theta * dx + cos_theta * dy
         
         return np.array([local_x, local_y])
     
-    def _observation_to_global(self, robot_pose, observation):
-        """
-        Convert observation from robot frame to global frame
-        """
+    def _inverse_observation_model(self, robot_pose, observation):
+        # Inverse observation model: convert observation from robot frame to global frame
+
         local_x, local_y = observation
         
         # Rotate to global frame
@@ -241,42 +233,29 @@ class FastSLAM:
         return np.array([global_x, global_y])
     
     def _observation_jacobian(self, robot_pose, landmark_pos):
-        """
-        Jacobian of observation model w.r.t. landmark position
-        """
-        # For direct (x, y) observations, this is the rotation matrix
-        cos_theta = np.cos(-robot_pose[2])
-        sin_theta = np.sin(-robot_pose[2])
-        
-        H = np.array([[cos_theta, -sin_theta],
-                      [sin_theta,  cos_theta]])
-        
+        cos_theta = np.cos(robot_pose[2])
+        sin_theta = np.sin(robot_pose[2])
+    
+        H = np.array([[cos_theta, sin_theta],
+                      [-sin_theta,  cos_theta]])
         return H
     
     def _normalize_weights(self):
-        """
-        Normalize particle weights
-        """
         total_weight = sum(p.weight for p in self.particles)
         if total_weight > 0:
             for particle in self.particles:
                 particle.weight /= total_weight
     
     def _effective_sample_size(self):
-        """
-        Compute effective sample size
-        """
+        # Estimates how many particles are actually contributing to the estimate
         weights = np.array([p.weight for p in self.particles])
         return 1.0 / np.sum(weights**2)
     
     def _resample(self):
-        """
-        Resample particles using systematic resampling
-        """
+
         weights = np.array([p.weight for p in self.particles])
         cumsum = np.cumsum(weights)
         
-        # Systematic resampling
         r = np.random.uniform(0, 1.0/self.num_particles)
         new_particles = []
         
@@ -287,7 +266,6 @@ class FastSLAM:
             while u > cumsum[j]:
                 j += 1
             
-            # Deep copy the selected particle
             new_particle = deepcopy(self.particles[j])
             new_particle.weight = 1.0 / self.num_particles
             new_particles.append(new_particle)
@@ -296,14 +274,14 @@ class FastSLAM:
     
     def get_best_estimate(self):
         """
-        Get the best pose estimate (highest weight particle)
+        Get the pose estimation and landmarks of the best particle
         """
         best_particle = max(self.particles, key=lambda p: p.weight)
         return best_particle.pose.copy(), deepcopy(best_particle.landmarks)
     
     def get_mean_estimate(self):
         """
-        Get weighted mean pose estimate
+        Get weighted mean estimation of robot pose
         """
         weights = np.array([p.weight for p in self.particles])
         
@@ -319,9 +297,6 @@ class FastSLAM:
         return np.array([x_mean, y_mean, theta_mean])
     
     def _normalize_angle(self, angle):
-        """
-        Normalize angle to [-pi, pi]
-        """
         return np.arctan2(np.sin(angle), np.cos(angle))
 
 # Example usage
