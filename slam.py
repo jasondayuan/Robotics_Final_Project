@@ -299,29 +299,177 @@ class FastSLAM:
     def _normalize_angle(self, angle):
         return np.arctan2(np.sin(angle), np.cos(angle))
 
-# Example usage
 if __name__ == "__main__":
-    # Initialize FastSLAM
-    slam = FastSLAM(num_particles=50)
+    print("=== FastSLAM Validation ===")
     
-    # Example simulation loop
-    for step in range(100):
-        # Control input [omega_left, omega_right] - wheel angular velocities
-        control = np.array([1.0, 1.2])  # Example: slight turn to the right
-        dt = 0.1
+    # Initialize FastSLAM
+    slam = FastSLAM(num_particles=100)
+    
+    # Ground truth setup
+    gt_pose = np.array([0.5, 0.5, 0.0])  # Starting pose [x, y, theta]
+    
+    # True landmark positions in global frame (simulated corner positions)
+    true_landmarks = np.array([
+        [2.0, 1.0],   # Corner 1
+        [3.0, 3.0],   # Corner 2
+        [1.0, 4.0],   # Corner 3
+        [4.0, 2.0],   # Corner 4
+        [0.5, 3.5]    # Corner 5
+    ])
+    
+    # Initialize all particles with the same starting pose for comparison
+    for particle in slam.particles:
+        particle.pose = gt_pose.copy()
+    
+    # Simulation parameters
+    dt = 0.1
+    num_steps = 150
+    
+    # Storage for analysis
+    gt_trajectory = [gt_pose.copy()]
+    estimated_trajectory = []
+    pose_errors = []
+    
+    print(f"Initial GT pose: {gt_pose}")
+    print(f"True landmarks: {len(true_landmarks)} corners")
+    print(f"Running simulation for {num_steps} steps...")
+    
+    # Simulation loop
+    for step in range(num_steps):
         
-        # Prediction step
+        # Control input - create interesting trajectory
+        if step < 50:
+            control = np.array([2.0, 2.0])    # Move forward
+        elif step < 100:
+            control = np.array([1.5, 2.5])   # Turn right while moving
+        else:
+            control = np.array([2.2, 1.8])   # Turn left while moving
+        
+        # Update ground truth pose (same motion model as SLAM)
+        config = slam.config
+        omega_l, omega_r = control
+        v = (config.wheel_radius / 2) * (omega_r + omega_l)
+        omega = (config.wheel_radius / config.wheel_base) * (omega_r - omega_l)
+        
+        # Ground truth motion (no noise)
+        dx = v * dt * np.cos(gt_pose[2])
+        dy = v * dt * np.sin(gt_pose[2])
+        dtheta = omega * dt
+        
+        gt_pose[0] += dx
+        gt_pose[1] += dy
+        gt_pose[2] += dtheta
+        gt_pose[2] = np.arctan2(np.sin(gt_pose[2]), np.cos(gt_pose[2]))  # Normalize angle
+        
+        gt_trajectory.append(gt_pose.copy())
+        
+        # Generate observations: corners visible from current position
+        observations = []
+        max_range = 3.0  # Maximum sensor range
+        
+        for landmark in true_landmarks:
+            # Transform landmark to robot frame
+            dx = landmark[0] - gt_pose[0]
+            dy = landmark[1] - gt_pose[1]
+            
+            # Check if landmark is within range
+            distance = np.sqrt(dx*dx + dy*dy)
+            if distance < max_range:
+                # Transform to robot frame
+                cos_theta = np.cos(gt_pose[2])
+                sin_theta = np.sin(gt_pose[2])
+                
+                local_x = cos_theta * dx + sin_theta * dy
+                local_y = -sin_theta * dx + cos_theta * dy
+                
+                # Add observation noise to simulate corner detection uncertainty
+                noise = np.random.multivariate_normal([0, 0], slam.obs_noise_cov)
+                observed_corner = np.array([local_x, local_y]) + noise
+                
+                # Only include observations in front of robot (positive x in robot frame)
+                if observed_corner[0] > 0:
+                    observations.append(observed_corner)
+        
+        # SLAM prediction step
         slam.predict(control, dt)
         
-        # Simulated observations (corners detected by your corner detector)
-        observations = [
-            np.array([1.0, 0.5]),  # Example corner observation
-            np.array([2.0, 1.0])   # Another corner
-        ]
+        # SLAM update step (only if we have observations)
+        if len(observations) > 0:
+            slam.update(observations)
         
-        # Update step
-        slam.update(observations)
+        # Get estimates
+        pose_estimate, landmarks_estimate = slam.get_best_estimate()
+        mean_pose_estimate = slam.get_mean_estimate()
+        estimated_trajectory.append(pose_estimate.copy())
         
-        # Get current estimate
-        pose_estimate, landmarks = slam.get_best_estimate()
-        print(f"Step {step}: Pose = {pose_estimate}, Landmarks = {len(landmarks)}")
+        # Compute pose error
+        position_error = np.linalg.norm(pose_estimate[:2] - gt_pose[:2])
+        angle_error = abs(np.arctan2(np.sin(pose_estimate[2] - gt_pose[2]), 
+                                   np.cos(pose_estimate[2] - gt_pose[2])))
+        pose_errors.append([position_error, angle_error])
+        
+        # Print progress every 25 steps
+        if step % 25 == 0:
+            print(f"\nStep {step}:")
+            print(f"  Control: [{control[0]:.1f}, {control[1]:.1f}] rad/s")
+            print(f"  GT pose: [{gt_pose[0]:.2f}, {gt_pose[1]:.2f}, {gt_pose[2]:.2f}]")
+            print(f"  Est pose: [{pose_estimate[0]:.2f}, {pose_estimate[1]:.2f}, {pose_estimate[2]:.2f}]")
+            print(f"  Mean pose: [{mean_pose_estimate[0]:.2f}, {mean_pose_estimate[1]:.2f}, {mean_pose_estimate[2]:.2f}]")
+            print(f"  Position error: {position_error:.3f} m")
+            print(f"  Angle error: {np.rad2deg(angle_error):.1f} deg")
+            print(f"  Observations: {len(observations)} corners")
+            print(f"  Landmarks: {len(landmarks_estimate)} total")
+            print(f"  ESS: {slam._effective_sample_size():.1f}")
+    
+    # Final analysis
+    pose_errors = np.array(pose_errors)
+    print(f"\n=== Final Results ===")
+    print(f"Total trajectory length: {num_steps} steps")
+    print(f"Average position error: {np.mean(pose_errors[:, 0]):.3f} ± {np.std(pose_errors[:, 0]):.3f} m")
+    print(f"Average angle error: {np.rad2deg(np.mean(pose_errors[:, 1])):.1f} ± {np.rad2deg(np.std(pose_errors[:, 1])):.1f} deg")
+    print(f"Final position error: {pose_errors[-1, 0]:.3f} m")
+    print(f"Final angle error: {np.rad2deg(pose_errors[-1, 1]):.1f} deg")
+    print(f"Final landmarks detected: {len(landmarks_estimate)} out of {len(true_landmarks)} true landmarks")
+    
+    # Simple visualization (optional - requires matplotlib)
+    try:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Plot trajectory
+        gt_traj = np.array(gt_trajectory)
+        est_traj = np.array(estimated_trajectory)
+        
+        ax1.plot(gt_traj[:, 0], gt_traj[:, 1], 'g-', linewidth=2, label='Ground Truth')
+        ax1.plot(est_traj[:, 0], est_traj[:, 1], 'r--', linewidth=2, label='SLAM Estimate')
+        ax1.scatter(true_landmarks[:, 0], true_landmarks[:, 1], c='blue', s=100, marker='s', label='True Landmarks')
+        
+        # Plot estimated landmarks
+        if len(landmarks_estimate) > 0:
+            est_landmarks = np.array([lm['mean'] for lm in landmarks_estimate.values()])
+            ax1.scatter(est_landmarks[:, 0], est_landmarks[:, 1], c='red', s=50, marker='x', label='Est. Landmarks')
+        
+        ax1.set_xlabel('X (m)')
+        ax1.set_ylabel('Y (m)')
+        ax1.set_title('SLAM Trajectory Comparison')
+        ax1.legend()
+        ax1.grid(True)
+        ax1.axis('equal')
+        
+        # Plot errors over time
+        ax2.plot(pose_errors[:, 0], 'b-', label='Position Error')
+        ax2_twin = ax2.twinx()
+        ax2_twin.plot(np.rad2deg(pose_errors[:, 1]), 'r-', label='Angle Error')
+        
+        ax2.set_xlabel('Time Step')
+        ax2.set_ylabel('Position Error (m)', color='b')
+        ax2_twin.set_ylabel('Angle Error (deg)', color='r')
+        ax2.set_title('SLAM Estimation Errors')
+        ax2.grid(True)
+        
+        plt.tight_layout()
+        plt.show()
+        
+    except ImportError:
+        print("Matplotlib not available for visualization")
+    
+    print("\n=== Validation Complete ===")
