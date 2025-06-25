@@ -284,14 +284,15 @@ class FastSLAM:
         Get weighted mean estimation of robot pose
         """
         weights = np.array([p.weight for p in self.particles])
+        weight_sum = np.sum(weights)
         
         # Handle circular mean for angle
-        x_mean = np.sum([p.pose[0] * p.weight for p in self.particles])
-        y_mean = np.sum([p.pose[1] * p.weight for p in self.particles])
+        x_mean = np.sum([p.pose[0] * p.weight for p in self.particles]) / weight_sum
+        y_mean = np.sum([p.pose[1] * p.weight for p in self.particles]) / weight_sum
         
         # Circular mean for angle
-        sin_sum = np.sum([np.sin(p.pose[2]) * p.weight for p in self.particles])
-        cos_sum = np.sum([np.cos(p.pose[2]) * p.weight for p in self.particles])
+        sin_sum = np.sum([np.sin(p.pose[2]) * p.weight for p in self.particles]) / weight_sum
+        cos_sum = np.sum([np.cos(p.pose[2]) * p.weight for p in self.particles]) / weight_sum
         theta_mean = np.arctan2(sin_sum, cos_sum)
         
         return np.array([x_mean, y_mean, theta_mean])

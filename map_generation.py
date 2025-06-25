@@ -339,16 +339,15 @@ if __name__ == "__main__":
     np.random.seed(42)
     random.seed(42)
 
-    maze_sizes = [[5, 5], [8, 8], [12, 12]]
+    maze_size = [3, 3]
     num_mazes = 1000
 
     dataset = MazeDataset()
-    for maze_size in maze_sizes:
-        cell_size = [1, 1]
-        wall_thickness = 0.3
-        dataset.generate_mazes(maze_size, cell_size, num_mazes, wall_thickness)
+    cell_size = [0.75, 0.75]
+    wall_thickness = 0.1
+    dataset.generate_mazes(maze_size, cell_size, num_mazes, wall_thickness)
     
-    dataset.save_dataset('dataset/development_dataset.json')
+    dataset.save_dataset('dataset/maze_dataset.json')
 
     world_coordinates = dataset.get_dfs_order(dataset[0], start_cell=(0, 0))
     dataset.visualize_dfs_path(dataset[0], world_coordinates)

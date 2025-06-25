@@ -22,9 +22,9 @@ class RobotConfig:
         self.dt = 0.1
         
         # Noise parameters (standard deviations)
-        self.motion_pos_std = 0.01  
-        self.motion_ang_std = np.deg2rad(0.5)  
-        self.obs_noise_std = 0.02 
+        self.motion_pos_std = 0.005  
+        self.motion_ang_std = np.deg2rad(0.25)  
+        self.obs_noise_std = 0.01
         
     @property
     def motion_noise_cov(self):
@@ -372,7 +372,7 @@ if __name__ == "__main__":
     np.random.seed(42) 
     
     dataset = MazeDataset()
-    dataset.load_dataset('dataset/development_dataset.json')
+    dataset.load_dataset('dataset/maze_dataset.json')
     maze = dataset[100]
 
     config = RobotConfig()

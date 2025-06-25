@@ -43,6 +43,6 @@ if __name__ == '__main__':
 
     OUTPUT_VIDEO_NAME = 'simulation_video.mp4'
 
-    FRAMES_PER_SECOND = 50
+    FRAMES_PER_SECOND = 60
 
     create_video_from_images(IMAGE_DIRECTORY, OUTPUT_VIDEO_NAME, FRAMES_PER_SECOND)
