@@ -251,9 +251,7 @@ class MazeDataset:
         return world_coordinates
 
     def visualize_dfs_path(self, maze, dfs_path):
-        """
-        Simple visualization of the maze with DFS path overlay
-        """
+
         cell_size = maze['cell_size']
         maze_width = int(maze['maze_size'][0] / cell_size[0])
         maze_height = int(maze['maze_size'][1] / cell_size[1])

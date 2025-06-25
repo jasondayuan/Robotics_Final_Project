@@ -172,9 +172,7 @@ class FastSLAM:
         }
     
     def _update_weight(self, particle, observations):
-        """
-        Update particle weight based on observation
-        """
+
         log_weight = 0.0
         
         for obs in observations:
@@ -201,11 +199,6 @@ class FastSLAM:
         particle.weight = np.exp(log_weight)
     
     def _observation_model(self, robot_pose, landmark_pos):
-        """
-        robot_pose: [x, y, theta]
-        landmark_pos: [m_x, m_y], under the global frame
-        Returns the observation in the robot frame [local_x, local_y]
-        """
 
         dx = landmark_pos[0] - robot_pose[0]
         dy = landmark_pos[1] - robot_pose[1]
@@ -273,16 +266,11 @@ class FastSLAM:
         self.particles = new_particles
     
     def get_best_estimate(self):
-        """
-        Get the pose estimation and landmarks of the best particle
-        """
         best_particle = max(self.particles, key=lambda p: p.weight)
         return best_particle.pose.copy(), deepcopy(best_particle.landmarks)
     
     def get_mean_estimate(self):
-        """
-        Get weighted mean estimation of robot pose
-        """
+
         weights = np.array([p.weight for p in self.particles])
         weight_sum = np.sum(weights)
         

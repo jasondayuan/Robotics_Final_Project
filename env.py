@@ -301,12 +301,12 @@ class Env:
                     if abs(den) < 1e-10:  # Parallel, might have numerical issues
                         continue
                     
-                    # Parameter t for line segment (0 <= t <= 1 means point is on segment)
+                    # Parameter t for line segment
                     t = ((robot_x - x1) * ray_dir_y - (robot_y - y1) * ray_dir_x) / den
                     if t < 0 or t > 1:
                         continue
                     
-                    # Parameter u for ray (u > 0 means point is in front of robot)
+                    # Parameter u for ray
                     u = ((robot_x - x1) * seg_dir_y - (robot_y - y1) * seg_dir_x) / den
                     
                     # Check if intersection is valid and closer than current scan
@@ -316,9 +316,6 @@ class Env:
         return scans
 
     def _normalize_angle(self, angle):
-        """
-        Normalize angle to [-pi, pi] to match FastSLAM representation
-        """
         return np.arctan2(np.sin(angle), np.cos(angle))
 
     def _get_walls(self):
